@@ -268,6 +268,79 @@ function walkDir(dir, maxDepth = 3, depth = 0) {
   return results;
 }
 
+/**
+ * Extract metadata from a parsed session entry
+ * @param {Object} session - Parsed session object
+ * @returns {{model: string, promptHash: string, timestamp: string, linesCount: number}}
+ */
+function extractMetadata(session) {
+  return {
+    model: session.model || 'unknown',
+    promptHash: session.promptHash || hashString(session.prompt || ''),
+    timestamp: session.timestamp || new Date().toISOString(),
+    linesCount: (session.code || []).length,
+  };
+}
+
+/**
+ * Unified detection entry point.
+ * Runs all detectors against a commit and returns combined results.
+ * @param {string} commitHash - Git commit hash
+ * @param {Object} [options] - Options
+ * @param {string} [options.cwd] - Working directory (git root)
+ * @returns {{trailers: Object|null, sessions: Array, aiLines: Array}}
+ */
+function detect(commitHash, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const result = {
+    commit: commitHash,
+    trailers: null,
+    sessions: [],
+    aiLines: [],
+  };
+
+  // 1. Check git trailers
+  try {
+    result.trailers = parseGitTrailers(commitHash);
+  } catch {
+    // ignore — not in a git repo or commit not found
+  }
+
+  // 2. Find and parse session logs
+  const logs = findSessionLogs(cwd);
+  for (const log of logs) {
+    const adapter = ADAPTERS[log.adapter];
+    if (adapter) {
+      const parsed = adapter.parseSession(log.path);
+      result.sessions.push(...parsed);
+    }
+  }
+
+  // 3. If we have sessions, try to match diff lines
+  if (result.sessions.length > 0) {
+    try {
+      const diff = execSync(
+        `git diff ${commitHash}^..${commitHash}`,
+        { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+      );
+      result.aiLines = detectAILines(diff, result.sessions);
+    } catch {
+      // First commit or other error — try diff against empty tree
+      try {
+        const diff = execSync(
+          `git diff --root ${commitHash}`,
+          { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+        );
+        result.aiLines = detectAILines(diff, result.sessions);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   ADAPTERS,
   parseClaude,
@@ -277,4 +350,6 @@ module.exports = {
   lineSimilarity,
   hashString,
   findSessionLogs,
+  extractMetadata,
+  detect,
 };
