@@ -1,7 +1,7 @@
 {
   "name": "git-who",
-  "version": "0.1.0",
-  "description": "git blame for AI — Track which lines were AI-generated, by which model, and whether they've been reviewed.",
+  "version": "0.2.0",
+  "description": "AI code review tool — track, audit, and review AI-generated code with line-level granularity, review status, and risk assessment",
   "main": "src/index.js",
   "bin": {
     "git-who": "bin/git-who"
@@ -11,16 +11,19 @@
     "lint": "echo 'no linter configured'"
   },
   "keywords": [
-    "git",
-    "ai",
-    "code-provenance",
-    "blame",
+    "ai-code-review",
+    "code-audit",
+    "git-blame",
+    "ai-attribution",
+    "code-quality",
+    "code-review",
+    "compliance",
+    "risk-assessment",
+    "ghost-integration",
     "claude",
     "cursor",
     "copilot",
-    "code-review",
-    "audit",
-    "compliance"
+    "ai-governance"
   ],
   "author": "coldxiangyu163",
   "license": "MIT",

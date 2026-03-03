@@ -6,11 +6,26 @@
 [![Node.js Version](https://img.shields.io/node/v/git-who.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> `git blame` for AI — Track which lines were AI-generated, by which model, and whether they've been reviewed.
+> **AI Code Review Tool** — `git blame` for AI. Line-level tracking, review status, and risk assessment for AI-generated code.
 
-As AI coding tools (Claude Code, Cursor, Copilot) become mainstream, teams face a critical question: **which code was written by AI, and has it been reviewed?**
+As AI coding tools (Claude Code, Cursor, Copilot) become mainstream, teams need to **review AI-generated code** before it reaches production. git-who provides line-level tracking, review status, and risk assessment for AI code.
 
-git-who answers this by tracking AI code provenance at the line level.
+## Key Differentiators
+
+- **Line-level granularity**: Unlike commit-level tools (ghost), git-who tracks AI attribution per line
+- **Reviewer perspective**: Built for code reviewers and auditors, not developers
+- **Risk assessment**: Automatic risk scoring based on AI code complexity and review status
+- **CI integration**: Block merges when unreviewed AI code exceeds thresholds
+- **ghost-compatible**: Reads ghost-meta to auto-mark entire commits as AI-generated
+
+## Use Cases
+
+- **Code Review**: Identify which AI-generated lines need human review before merging
+- **Compliance Audits**: Track AI code provenance for security and regulatory requirements
+- **Quality Control**: Monitor AI code quality across models and projects
+- **Team Collaboration**: Ensure AI-generated code is reviewed by senior developers
+- **Open Source Maintenance**: Verify contributor code provenance and review status
+- **Enterprise Governance**: Enforce AI code review policies across teams
 
 ## Demo
 
@@ -20,34 +35,49 @@ $ git who src/index.js
 src/index.js
 ────────────────────────────────────────────────────────
   👤 Human: 15 lines  |  🤖 AI: 42 lines  |  ✅ Reviewed: 35/42
+  ⚠️  Risk Score: 6.2/10 (7 lines need review)
 ────────────────────────────────────────────────────────
 
   👤 L1-15        Human
-  🤖 L16-42       claude-sonnet-4-20250514  ✅  #a3f2c891
+  🤖 L16-42       claude-sonnet-4-20250514  ✅ Reviewed  #a3f2c891
   👤 L43-50       Human
-  🤖 L51-89       gpt-4o         ❌  #7b1e4d02
+  🤖 L51-89       gpt-4o         ❌ Not Reviewed  #7b1e4d02  ⚠️ High Risk
+
+  💡 Review Suggestions:
+     • L51-89: Database query optimization (high complexity, security-sensitive)
+     • L16-42: Already reviewed by alice@example.com on 2026-03-02
 ```
 
 ```
 $ git who --stats
 
-📊 git-who Statistics
+📊 git-who Code Review Report
 ──────────────────────────────────────────────────
   Tracked commits:    23
   Files with AI code: 8
   AI-generated lines: 342
   Reviewed:           289 (84%)
-  Unreviewed:         53
+  Unreviewed:         53 (16%)  ⚠️
+  
+  ⚠️  Risk Assessment: MEDIUM (6.2/10)
+     • 3 files with unreviewed AI code in critical paths
+     • 2 files exceed 50% AI code without review
+     • 1 file with high-complexity unreviewed AI code
+
+  Review Status:
+    ✅ Reviewed:        289 lines (84%)
+    ❌ Not Reviewed:     53 lines (16%)
+    ⚠️  Needs Review:    12 lines (high risk)
 
   Models:
-    claude-sonnet-4-20250514       ████████████ 198 (58%)
-    gpt-4o               ██████ 102 (30%)
-    gemini-2.5-pro        ██ 42 (12%)
+    claude-sonnet-4-20250514       ████████████ 198 (58%)  ✅ 95% reviewed
+    gpt-4o               ██████ 102 (30%)  ⚠️ 65% reviewed
+    gemini-2.5-pro        ██ 42 (12%)   ✅ 100% reviewed
 
-  Top files:
-    src/index.js                   89 AI lines  all reviewed
-    src/detector.js                67 AI lines  3 unreviewed
-    src/reporter.js                52 AI lines  all reviewed
+  Top files needing review:
+    src/detector.js                67 AI lines  3 unreviewed  🔴 Risk: 7.8/10
+    src/auth.js                    45 AI lines  12 unreviewed 🔴 Risk: 8.2/10
+    src/reporter.js                52 AI lines  all reviewed  ✅ Risk: 2.1/10
 ```
 
 ## Install
@@ -85,15 +115,48 @@ git who --ci --threshold 20
 | Claude Code | `~/.claude/projects/*/session_*` | ✅ Supported |
 | Cursor | `.cursor/sessions/` | ✅ Supported |
 | Git Trailers | `AI-Model:` in commit message | ✅ Supported |
+| **ghost** | `ghost-meta` in commit message | ✅ Supported |
 | Copilot | — | 🔜 Planned |
+
+### ghost Integration
+
+git-who automatically detects [ghost](https://github.com/adamveld12/ghost) commits and marks entire commits as AI-generated:
+
+```bash
+# ghost commit creates:
+add JWT authentication
+
+ghost-meta
+ghost-prompt: add JWT authentication middleware
+ghost-agent: claude
+ghost-model: claude-sonnet-4-20250514
+ghost-session: 7f3a2b1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c
+
+# git-who automatically detects and marks all lines in this commit as AI
+$ git who src/auth.js
+  🤖 L1-45  claude-sonnet-4-20250514  ❌ Not Reviewed  ghost:7f3a2b1c
+  
+  💡 This commit was created by ghost (intent-based commit)
+     Original prompt: "add JWT authentication middleware"
+     Review recommended before production deployment
+```
+
+**Complementary Tools**:
+- **ghost**: Intent-based commits (developer perspective, commit-level tracking, proactive)
+- **git-who**: Code review tool (reviewer perspective, line-level tracking, reactive)
+
+Use both together:
+1. Developers use ghost to commit AI-generated code with intent metadata
+2. Reviewers use git-who to audit and review AI code before merging
 
 ## CLI Reference
 
 ```
-git who <file>          Show AI provenance for each line
+git who <file>          Show AI provenance and review status for each line
 git who --init          Install post-commit hook
-git who --stats         Show project-level AI code statistics
+git who --stats         Show project-level AI code review statistics
 git who --ci            CI mode (exit 1 if unreviewed AI code > threshold)
+git who --review <file> Mark AI code as reviewed (interactive)
 git who --version       Show version
 git who --help          Show help
 
@@ -102,7 +165,9 @@ Options:
   --model <name>        Filter by AI model
   --reviewed            Show only reviewed lines
   --unreviewed          Show only unreviewed lines
+  --needs-review        Show only high-risk unreviewed lines
   --threshold <n>       CI mode: max % of unreviewed AI code (default: 20)
+  --risk-threshold <n>  CI mode: max risk score (default: 7.0)
 ```
 
 ## Configuration
@@ -112,10 +177,16 @@ Create `.gitwhorc` in your repo root (auto-created by `git who --init`):
 ```json
 {
   "version": 1,
-  "adapters": ["claude", "cursor"],
+  "adapters": ["claude", "cursor", "ghost"],
   "ci": {
     "threshold": 20,
-    "failOnUnreviewed": true
+    "riskThreshold": 7.0,
+    "failOnUnreviewed": true,
+    "failOnHighRisk": true
+  },
+  "review": {
+    "requireReviewer": true,
+    "autoMarkGhostAsReviewed": false
   },
   "ignore": ["node_modules/**", "dist/**", "*.min.js"]
 }
@@ -163,27 +234,33 @@ ai-review-gate:
 
 ## Why git-who?
 
-### The AI Code Provenance Problem
+### The AI Code Review Problem
 
-As AI coding assistants generate more production code, teams face critical questions:
+As AI coding assistants generate more production code, teams need systematic code review processes:
 
-- **Audit**: Which lines were AI-generated vs human-written?
-- **Review**: Has AI code been reviewed by a human?
-- **Compliance**: Can we prove code provenance for security audits?
-- **Quality**: Which AI models produce the most maintainable code?
+- **Review Workflow**: Which AI-generated lines need human review before production?
+- **Risk Assessment**: What's the risk level of unreviewed AI code in critical paths?
+- **Compliance**: Can we prove all AI code was reviewed for security audits?
+- **Quality Control**: Which AI models produce code that passes review most often?
+- **Audit Trail**: Who reviewed which AI-generated code and when?
 
-Traditional `git blame` only shows commits, not whether code was AI-generated. git-who solves this.
+Traditional code review tools don't distinguish AI-generated code from human code. git-who provides line-level tracking, review status, and risk assessment specifically for AI code.
 
 ### Comparison
 
-| Feature | git-blame | memento | CodeGPT | **git-who** |
-|---------|-----------|---------|---------|-------------|
-| Line-level attribution | ✅ (human only) | ❌ | ❌ | ✅ |
-| AI model tracking | ❌ | ✅ (session) | ❌ | ✅ |
+| Feature | git-blame | ghost | memento | **git-who** |
+|---------|-----------|-------|---------|-------------|
+| Line-level tracking | ✅ (human only) | ❌ (commit-level) | ❌ | ✅ |
+| AI model tracking | ❌ | ✅ | ✅ (session) | ✅ |
 | Review status | ❌ | ❌ | ❌ | ✅ |
-| Statistics | ❌ | ❌ | ❌ | ✅ |
+| Risk assessment | ❌ | ❌ | ❌ | ✅ |
+| Review suggestions | ❌ | ❌ | ❌ | ✅ |
 | CI gate | ❌ | ❌ | ❌ | ✅ |
-| Clean git history | — | ❌ (modifies commits) | ❌ | ✅ (git-notes) |
+| Audit trail | ❌ | ❌ | ❌ | ✅ |
+| ghost integration | N/A | N/A | N/A | ✅ |
+| Target user | Developer | Developer | Developer | **Reviewer/Auditor** |
+| Use case | Attribution | Intent tracking | Session logs | **Code review & audit** |
+| Workflow | Passive | Proactive | Passive | **Reactive** |
 
 ## FAQ
 
