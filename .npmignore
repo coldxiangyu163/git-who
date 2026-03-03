@@ -1,0 +1,8 @@
+test/
+.github/
+docs/
+examples/
+*.test.js
+.git
+.DS_Store
+.gitignore

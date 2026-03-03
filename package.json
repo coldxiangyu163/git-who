@@ -22,12 +22,16 @@
     "audit",
     "compliance"
   ],
-  "author": "coldxiangyu",
+  "author": "coldxiangyu163",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/coldxiangyu163/git-who.git"
   },
+  "bugs": {
+    "url": "https://github.com/coldxiangyu163/git-who/issues"
+  },
+  "homepage": "https://github.com/coldxiangyu163/git-who#readme",
   "engines": {
     "node": ">=18.0.0"
   }
