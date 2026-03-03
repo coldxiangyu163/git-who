@@ -1,0 +1,34 @@
+{
+  "name": "git-who",
+  "version": "0.1.0",
+  "description": "git blame for AI — Track which lines were AI-generated, by which model, and whether they've been reviewed.",
+  "main": "src/index.js",
+  "bin": {
+    "git-who": "bin/git-who"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "echo 'no linter configured'"
+  },
+  "keywords": [
+    "git",
+    "ai",
+    "code-provenance",
+    "blame",
+    "claude",
+    "cursor",
+    "copilot",
+    "code-review",
+    "audit",
+    "compliance"
+  ],
+  "author": "coldxiangyu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coldxiangyu163/git-who.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
