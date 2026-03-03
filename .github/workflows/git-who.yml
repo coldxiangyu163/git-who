@@ -1,0 +1,32 @@
+name: git-who AI Code Review Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  git-who-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for git-notes
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install git-who
+        run: npm install -g git-who
+
+      - name: Fetch git-who notes
+        run: git fetch origin refs/notes/git-who:refs/notes/git-who || true
+
+      - name: Run git-who CI check
+        run: git-who --ci --threshold 50
+
+      - name: Show AI code stats (informational)
+        if: always()
+        run: git-who --stats || true

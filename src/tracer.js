@@ -217,14 +217,15 @@ function getTracedCommits(options = {}) {
 /**
  * Get aggregated provenance for a file across all commits
  * @param {string} file - File path relative to git root
+ * @param {Object} [options] - Options (e.g. { cwd: '/path/to/repo' })
  * @returns {Array<{line: number, model: string, promptHash: string, reviewed: boolean, commit: string}>}
  */
-function getFileProvenance(file) {
-  const commits = getTracedCommits();
+function getFileProvenance(file, options = {}) {
+  const commits = getTracedCommits(options);
   const results = [];
 
   for (const commit of commits) {
-    const data = getTrace(commit);
+    const data = getTrace(commit, options);
     if (data && data[file]) {
       for (const trace of data[file]) {
         results.push({ ...trace, commit });

@@ -26,7 +26,7 @@ const HELP = `
   --model <name>          Filter by AI model
   --reviewed              Show only reviewed lines
   --unreviewed            Show only unreviewed lines
-  --threshold <n>         CI mode: max % of unreviewed AI code (default: 20)
+  --threshold <n>         CI mode: max % of unreviewed AI code (default: 50)
 
 \x1b[1mEXAMPLES\x1b[0m
   git who src/index.js
@@ -46,9 +46,10 @@ function parseArgs(argv) {
     json: false,
     model: null,
     reviewed: null,
-    threshold: 20,
+    threshold: 50,
     version: false,
     help: false,
+    commitHash: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -62,6 +63,10 @@ function parseArgs(argv) {
         break;
       case '--ci':
         args.command = 'ci';
+        break;
+      case '--detect-commit':
+        args.command = 'detect-commit';
+        args.commitHash = argv[++i];
         break;
       case '--version':
       case '-v':
@@ -153,6 +158,14 @@ async function main(argv) {
     case 'ci': {
       const { ciCheck } = require('./stats.js');
       await ciCheck(gitRoot, { threshold: args.threshold });
+      break;
+    }
+    case 'detect-commit': {
+      const { detect } = require('./detector.js');
+      const result = detect(args.commitHash || 'HEAD', { cwd: gitRoot });
+      if (result.isAI) {
+        console.log(`  🤖 AI code detected (${result.model || 'unknown'}) — confidence: ${Math.round((result.confidence || 0) * 100)}%`);
+      }
       break;
     }
     default:
