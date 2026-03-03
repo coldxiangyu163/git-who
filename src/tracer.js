@@ -9,7 +9,7 @@ const { execSync } = require('child_process');
  * without polluting commit history.
  */
 
-const NOTES_REF = 'refs/notes/ai-provenance';
+const NOTES_REF = 'refs/notes/git-who';
 
 /**
  * Execute a git command, optionally in a specific directory
@@ -45,11 +45,54 @@ function escapeShellArg(str) {
  * Add AI provenance trace for a commit
  * @param {string} commitHash 
  * @param {string} file - File path
- * @param {Array<{line: number, model: string, promptHash: string, reviewed: boolean}>} traces
+ * @param {Object|Array} lineRangeOrTraces - Either { start, end } line range or array of trace objects
+ * @param {Object} [metadata] - Metadata when using lineRange form: { model, prompt_hash, reviewed, timestamp }
  * @param {Object} [options] - Options (e.g. { cwd: '/path/to/repo' })
  */
-function addTrace(commitHash, file, traces, options = {}) {
-  const existing = getTrace(commitHash, options);
+function addTrace(commitHash, file, lineRangeOrTraces, metadata, options = {}) {
+  // Normalize arguments: support both (commit, file, traces, options) and (commit, file, lineRange, metadata, options)
+  let traces;
+  let opts;
+
+  if (Array.isArray(lineRangeOrTraces)) {
+    // Legacy form: addTrace(commit, file, tracesArray, options)
+    traces = lineRangeOrTraces;
+    opts = metadata || {};
+  } else if (lineRangeOrTraces && typeof lineRangeOrTraces === 'object' && ('start' in lineRangeOrTraces || 'line' in lineRangeOrTraces)) {
+    // New form: addTrace(commit, file, lineRange, metadata, options)
+    const meta = metadata || {};
+    opts = options || {};
+    if ('start' in lineRangeOrTraces && 'end' in lineRangeOrTraces) {
+      // Line range — expand to individual trace entries
+      traces = [];
+      for (let line = lineRangeOrTraces.start; line <= lineRangeOrTraces.end; line++) {
+        traces.push({
+          line,
+          model: meta.model || 'unknown',
+          promptHash: meta.prompt_hash || meta.promptHash || '',
+          confidence: meta.confidence || 1.0,
+          reviewed: meta.reviewed || false,
+          timestamp: meta.timestamp || new Date().toISOString(),
+        });
+      }
+    } else {
+      // Single line object
+      traces = [{
+        line: lineRangeOrTraces.line,
+        model: meta.model || 'unknown',
+        promptHash: meta.prompt_hash || meta.promptHash || '',
+        confidence: meta.confidence || 1.0,
+        reviewed: meta.reviewed || false,
+        timestamp: meta.timestamp || new Date().toISOString(),
+      }];
+    }
+  } else {
+    // Fallback: treat as traces array
+    traces = lineRangeOrTraces || [];
+    opts = metadata || {};
+  }
+
+  const existing = getTrace(commitHash, opts);
   const data = existing || {};
   
   if (!data[file]) data[file] = [];
@@ -61,7 +104,7 @@ function addTrace(commitHash, file, traces, options = {}) {
       data[file].push({
         line: trace.line,
         model: trace.model,
-        promptHash: trace.promptHash,
+        promptHash: trace.promptHash || trace.prompt_hash || '',
         confidence: trace.confidence || 1.0,
         reviewed: trace.reviewed || false,
         timestamp: trace.timestamp || new Date().toISOString(),
@@ -69,7 +112,7 @@ function addTrace(commitHash, file, traces, options = {}) {
     }
   }
 
-  writeNote(commitHash, data, options);
+  writeNote(commitHash, data, opts);
 }
 
 /**

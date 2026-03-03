@@ -283,62 +283,239 @@ function extractMetadata(session) {
 }
 
 /**
+ * Detect AI code via Claude Code session logs.
+ * Scans ~/.claude/projects for session files that match the commit time window.
+ * @param {string} commitHash - Git commit hash
+ * @param {Object} [options] - { cwd }
+ * @returns {{ isAI: boolean, tool: string|null, model: string|null, confidence: number, metadata: Object }}
+ */
+function detectClaudeCode(commitHash, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const result = { isAI: false, tool: null, model: null, confidence: 0, metadata: {} };
+
+  try {
+    // Get commit timestamp for time-window matching
+    const commitTime = execSync(
+      `git log -1 --format=%ct ${commitHash}`,
+      { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+    ).trim();
+    const commitEpoch = parseInt(commitTime, 10);
+    const windowSecs = 600; // 10-minute window
+
+    const claudeDir = ADAPTERS.claude.sessionDir();
+    if (!fs.existsSync(claudeDir)) return result;
+
+    const sessionFiles = walkDir(claudeDir).filter(f =>
+      f.endsWith('.json') || f.endsWith('.jsonl') || f.endsWith('.log')
+    );
+
+    let allSessions = [];
+    for (const file of sessionFiles) {
+      // Check file mtime within window of commit time
+      try {
+        const stat = fs.statSync(file);
+        const fileMtime = Math.floor(stat.mtimeMs / 1000);
+        if (Math.abs(fileMtime - commitEpoch) <= windowSecs) {
+          const parsed = parseClaude(file);
+          allSessions.push(...parsed);
+        }
+      } catch { /* skip unreadable files */ }
+    }
+
+    if (allSessions.length > 0) {
+      // Try to match diff lines
+      let diff = '';
+      try {
+        diff = execSync(
+          `git diff ${commitHash}^..${commitHash}`,
+          { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+        );
+      } catch {
+        try {
+          diff = execSync(
+            `git diff --root ${commitHash}`,
+            { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+          );
+        } catch { /* ignore */ }
+      }
+
+      const aiLines = diff ? detectAILines(diff, allSessions) : [];
+      if (aiLines.length > 0) {
+        const bestLine = aiLines.reduce((a, b) => a.confidence > b.confidence ? a : b);
+        result.isAI = true;
+        result.tool = 'Claude Code';
+        result.model = bestLine.model;
+        result.confidence = bestLine.confidence;
+        result.metadata = {
+          matchedLines: aiLines.length,
+          sessions: allSessions.length,
+          promptHash: bestLine.promptHash,
+        };
+      }
+    }
+  } catch { /* graceful degradation */ }
+
+  return result;
+}
+
+/**
+ * Detect AI code via Cursor session logs.
+ * Scans .cursor/sessions in the project root.
+ * @param {string} commitHash - Git commit hash
+ * @param {Object} [options] - { cwd }
+ * @returns {{ isAI: boolean, tool: string|null, model: string|null, confidence: number, metadata: Object }}
+ */
+function detectCursor(commitHash, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const result = { isAI: false, tool: null, model: null, confidence: 0, metadata: {} };
+
+  try {
+    const cursorDir = path.join(cwd, ADAPTERS.cursor.sessionDir());
+    if (!fs.existsSync(cursorDir)) return result;
+
+    const sessionFiles = walkDir(cursorDir).filter(f =>
+      f.endsWith('.json') || f.endsWith('.jsonl') || f.endsWith('.log')
+    );
+
+    let allSessions = [];
+    for (const file of sessionFiles) {
+      const parsed = parseCursor(file);
+      allSessions.push(...parsed);
+    }
+
+    if (allSessions.length > 0) {
+      let diff = '';
+      try {
+        diff = execSync(
+          `git diff ${commitHash}^..${commitHash}`,
+          { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+        );
+      } catch {
+        try {
+          diff = execSync(
+            `git diff --root ${commitHash}`,
+            { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
+          );
+        } catch { /* ignore */ }
+      }
+
+      const aiLines = diff ? detectAILines(diff, allSessions) : [];
+      if (aiLines.length > 0) {
+        const bestLine = aiLines.reduce((a, b) => a.confidence > b.confidence ? a : b);
+        result.isAI = true;
+        result.tool = 'Cursor';
+        result.model = bestLine.model;
+        result.confidence = bestLine.confidence;
+        result.metadata = {
+          matchedLines: aiLines.length,
+          sessions: allSessions.length,
+          promptHash: bestLine.promptHash,
+        };
+      }
+    }
+  } catch { /* graceful degradation */ }
+
+  return result;
+}
+
+/**
+ * Detect AI code via git commit trailers (AI-Model, AI-Prompt-Hash, AI-Generated-By, etc.)
+ * @param {string} commitHash - Git commit hash
+ * @param {Object} [options] - { cwd }
+ * @returns {{ isAI: boolean, tool: string|null, model: string|null, confidence: number, metadata: Object }}
+ */
+function detectGitTrailers(commitHash, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const result = { isAI: false, tool: null, model: null, confidence: 0, metadata: {} };
+
+  try {
+    const msg = execSync(`git log -1 --format=%B ${commitHash}`, {
+      encoding: 'utf-8',
+      cwd,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+
+    const trailers = {};
+
+    // Standard trailers
+    const modelMatch = msg.match(/AI-Model:\s*(.+)/i);
+    if (modelMatch) trailers.model = modelMatch[1].trim();
+
+    const promptMatch = msg.match(/AI-Prompt-Hash:\s*(.+)/i);
+    if (promptMatch) trailers.promptHash = promptMatch[1].trim();
+
+    const reviewMatch = msg.match(/AI-Reviewed:\s*(true|false|yes|no)/i);
+    if (reviewMatch) {
+      trailers.reviewed = ['true', 'yes'].includes(reviewMatch[1].toLowerCase());
+    }
+
+    // AI-Generated-By trailer (e.g. "AI-Generated-By: Claude Code")
+    const generatedByMatch = msg.match(/AI-Generated-By:\s*(.+)/i);
+    if (generatedByMatch) trailers.generatedBy = generatedByMatch[1].trim();
+
+    // Co-authored-by with AI indicators
+    const coauthorMatch = msg.match(/Co-authored-by:\s*(.*(?:claude|cursor|copilot|ai|gpt|gemini).*)/i);
+    if (coauthorMatch) trailers.coauthor = coauthorMatch[1].trim();
+
+    if (Object.keys(trailers).length > 0) {
+      result.isAI = true;
+      result.tool = trailers.generatedBy || trailers.coauthor || 'unknown';
+      result.model = trailers.model || null;
+      result.confidence = trailers.model ? 0.95 : 0.7;
+      result.metadata = trailers;
+    }
+  } catch { /* graceful degradation */ }
+
+  return result;
+}
+
+/**
  * Unified detection entry point.
  * Runs all detectors against a commit and returns combined results.
  * @param {string} commitHash - Git commit hash
  * @param {Object} [options] - Options
  * @param {string} [options.cwd] - Working directory (git root)
- * @returns {{trailers: Object|null, sessions: Array, aiLines: Array}}
+ * @returns {{ isAI: boolean, tool: string|null, model: string|null, confidence: number, metadata: Object, details: Object }}
  */
 function detect(commitHash, options = {}) {
   const cwd = options.cwd || process.cwd();
-  const result = {
-    commit: commitHash,
-    trailers: null,
-    sessions: [],
-    aiLines: [],
+
+  // Run all three detectors
+  const trailerResult = detectGitTrailers(commitHash, { cwd });
+  const claudeResult = detectClaudeCode(commitHash, { cwd });
+  const cursorResult = detectCursor(commitHash, { cwd });
+
+  // Pick the highest-confidence result
+  const candidates = [trailerResult, claudeResult, cursorResult].filter(r => r.isAI);
+
+  if (candidates.length === 0) {
+    return {
+      isAI: false,
+      tool: null,
+      model: null,
+      confidence: 0,
+      metadata: {},
+      details: {
+        trailers: trailerResult,
+        claudeCode: claudeResult,
+        cursor: cursorResult,
+      },
+    };
+  }
+
+  const best = candidates.reduce((a, b) => a.confidence > b.confidence ? a : b);
+  return {
+    isAI: true,
+    tool: best.tool,
+    model: best.model,
+    confidence: best.confidence,
+    metadata: best.metadata,
+    details: {
+      trailers: trailerResult,
+      claudeCode: claudeResult,
+      cursor: cursorResult,
+    },
   };
-
-  // 1. Check git trailers
-  try {
-    result.trailers = parseGitTrailers(commitHash);
-  } catch {
-    // ignore — not in a git repo or commit not found
-  }
-
-  // 2. Find and parse session logs
-  const logs = findSessionLogs(cwd);
-  for (const log of logs) {
-    const adapter = ADAPTERS[log.adapter];
-    if (adapter) {
-      const parsed = adapter.parseSession(log.path);
-      result.sessions.push(...parsed);
-    }
-  }
-
-  // 3. If we have sessions, try to match diff lines
-  if (result.sessions.length > 0) {
-    try {
-      const diff = execSync(
-        `git diff ${commitHash}^..${commitHash}`,
-        { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
-      );
-      result.aiLines = detectAILines(diff, result.sessions);
-    } catch {
-      // First commit or other error — try diff against empty tree
-      try {
-        const diff = execSync(
-          `git diff --root ${commitHash}`,
-          { encoding: 'utf-8', cwd, stdio: ['pipe', 'pipe', 'ignore'] }
-        );
-        result.aiLines = detectAILines(diff, result.sessions);
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  return result;
 }
 
 module.exports = {
@@ -346,6 +523,9 @@ module.exports = {
   parseClaude,
   parseCursor,
   parseGitTrailers,
+  detectClaudeCode,
+  detectCursor,
+  detectGitTrailers,
   detectAILines,
   lineSimilarity,
   hashString,

@@ -310,3 +310,115 @@ describe('findSessionLogs', () => {
     assert.strictEqual(cursorLogs.length, 0);
   });
 });
+
+describe('detectGitTrailers (high-level)', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitwho-trailer-test-'));
+    const { execSync } = require('child_process');
+    execSync('git init', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, stdio: 'ignore' });
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  it('detects AI-Model trailer in commit message', () => {
+    const { execSync } = require('child_process');
+    fs.writeFileSync(path.join(tmpDir, 'test.js'), 'const x = 1;\n');
+    execSync('git add -A', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git commit -m "feat: add x\n\nAI-Model: claude-sonnet-4-20250514\nAI-Prompt-Hash: abc123"', { cwd: tmpDir, stdio: 'ignore' });
+
+    const hash = execSync('git rev-parse HEAD', { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    const { detectGitTrailers } = require('../src/detector.js');
+    const result = detectGitTrailers(hash, { cwd: tmpDir });
+
+    assert.strictEqual(result.isAI, true);
+    assert.strictEqual(result.model, 'claude-sonnet-4-20250514');
+    assert.ok(result.confidence > 0);
+    assert.ok(result.metadata.promptHash);
+  });
+
+  it('detects AI-Generated-By trailer', () => {
+    const { execSync } = require('child_process');
+    fs.writeFileSync(path.join(tmpDir, 'test.js'), 'const y = 2;\n');
+    execSync('git add -A', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git commit -m "feat: add y\n\nAI-Generated-By: Claude Code"', { cwd: tmpDir, stdio: 'ignore' });
+
+    const hash = execSync('git rev-parse HEAD', { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    const { detectGitTrailers } = require('../src/detector.js');
+    const result = detectGitTrailers(hash, { cwd: tmpDir });
+
+    assert.strictEqual(result.isAI, true);
+    assert.strictEqual(result.tool, 'Claude Code');
+  });
+
+  it('returns isAI=false for commit without AI trailers', () => {
+    const { execSync } = require('child_process');
+    fs.writeFileSync(path.join(tmpDir, 'test.js'), 'const z = 3;\n');
+    execSync('git add -A', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git commit -m "feat: normal commit"', { cwd: tmpDir, stdio: 'ignore' });
+
+    const hash = execSync('git rev-parse HEAD', { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    const { detectGitTrailers } = require('../src/detector.js');
+    const result = detectGitTrailers(hash, { cwd: tmpDir });
+
+    assert.strictEqual(result.isAI, false);
+    assert.strictEqual(result.model, null);
+  });
+});
+
+describe('detect (unified entry point)', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitwho-detect-test-'));
+    const { execSync } = require('child_process');
+    execSync('git init', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, stdio: 'ignore' });
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  it('returns unified result with details from all detectors', () => {
+    const { execSync } = require('child_process');
+    fs.writeFileSync(path.join(tmpDir, 'test.js'), 'const x = 1;\n');
+    execSync('git add -A', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git commit -m "feat: add x\n\nAI-Model: claude-sonnet-4-20250514"', { cwd: tmpDir, stdio: 'ignore' });
+
+    const hash = execSync('git rev-parse HEAD', { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    const result = detect(hash, { cwd: tmpDir });
+
+    assert.strictEqual(result.isAI, true);
+    assert.ok(result.model);
+    assert.ok(result.details);
+    assert.ok('trailers' in result.details);
+    assert.ok('claudeCode' in result.details);
+    assert.ok('cursor' in result.details);
+  });
+
+  it('returns isAI=false for clean commit', () => {
+    const { execSync } = require('child_process');
+    fs.writeFileSync(path.join(tmpDir, 'test.js'), 'const y = 2;\n');
+    execSync('git add -A', { cwd: tmpDir, stdio: 'ignore' });
+    execSync('git commit -m "feat: human commit"', { cwd: tmpDir, stdio: 'ignore' });
+
+    const hash = execSync('git rev-parse HEAD', { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    const result = detect(hash, { cwd: tmpDir });
+
+    assert.strictEqual(result.isAI, false);
+    assert.strictEqual(result.tool, null);
+    assert.strictEqual(result.confidence, 0);
+  });
+
+  it('gracefully handles invalid commit hash', () => {
+    const result = detect('0000000000000000000000000000000000000000', { cwd: tmpDir });
+    assert.strictEqual(result.isAI, false);
+  });
+});
