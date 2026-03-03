@@ -18,8 +18,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install git-who
-        run: npm install -g git-who
+      - name: Install git-who locally
+        run: npm install && npm link
 
       - name: Fetch git-who notes
         run: git fetch origin refs/notes/git-who:refs/notes/git-who || true
