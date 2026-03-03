@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/coldxiangyu163/git-who/actions/workflows/ci.yml/badge.svg)](https://github.com/coldxiangyu163/git-who/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/git-who.svg)](https://www.npmjs.com/package/git-who)
+[![npm downloads](https://img.shields.io/npm/dm/git-who.svg)](https://www.npmjs.com/package/git-who)
+[![Node.js Version](https://img.shields.io/node/v/git-who.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > `git blame` for AI — Track which lines were AI-generated, by which model, and whether they've been reviewed.
@@ -124,11 +126,55 @@ Create `.gitwhorc` in your repo root (auto-created by `git who --init`):
 ### GitHub Actions
 
 ```yaml
-- name: AI Code Review Gate
-  run: npx git-who --ci --threshold 20
+name: AI Code Review Gate
+
+on: [push, pull_request]
+
+jobs:
+  ai-review-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git-notes
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Check AI code review status
+        run: |
+          npx git-who --ci --threshold 20
+          # Fails if >20% of AI code is unreviewed
+```
+
+### GitLab CI
+
+```yaml
+ai-review-gate:
+  stage: test
+  script:
+    - npm install -g git-who
+    - git who --ci --threshold 20
+  only:
+    - merge_requests
 ```
 
 ## Why git-who?
+
+### The AI Code Provenance Problem
+
+As AI coding assistants generate more production code, teams face critical questions:
+
+- **Audit**: Which lines were AI-generated vs human-written?
+- **Review**: Has AI code been reviewed by a human?
+- **Compliance**: Can we prove code provenance for security audits?
+- **Quality**: Which AI models produce the most maintainable code?
+
+Traditional `git blame` only shows commits, not whether code was AI-generated. git-who solves this.
+
+### Comparison
 
 | Feature | git-blame | memento | CodeGPT | **git-who** |
 |---------|-----------|---------|---------|-------------|
@@ -138,6 +184,49 @@ Create `.gitwhorc` in your repo root (auto-created by `git who --init`):
 | Statistics | ❌ | ❌ | ❌ | ✅ |
 | CI gate | ❌ | ❌ | ❌ | ✅ |
 | Clean git history | — | ❌ (modifies commits) | ❌ | ✅ (git-notes) |
+
+## FAQ
+
+### How does git-who detect AI-generated code?
+
+git-who uses multiple detection strategies:
+
+1. **Session logs**: Parses Claude Code and Cursor session files to match diffs
+2. **Git trailers**: Reads `AI-Model:` trailers in commit messages
+3. **Heuristics**: Analyzes commit patterns (large diffs, specific file types)
+
+### Does it modify my git history?
+
+No. git-who stores metadata in `git-notes` (a parallel data structure), keeping your commit history clean.
+
+### What if I use multiple AI tools?
+
+git-who supports multiple adapters simultaneously. Configure in `.gitwhorc`:
+
+```json
+{
+  "adapters": ["claude", "cursor", "copilot"]
+}
+```
+
+### Can I mark AI code as reviewed?
+
+Yes, use git trailers:
+
+```bash
+git commit -m "Fix bug in parser
+
+AI-Model: claude-sonnet-4
+Reviewed-By: alice@example.com"
+```
+
+### Does it work with monorepos?
+
+Yes. Run `git who --init` at the repo root. Each subproject can have its own `.gitwhorc`.
+
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
